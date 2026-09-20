@@ -1,0 +1,438 @@
+{
+  "title": "Strom",
+  "views": [
+    {
+      "title": "Tabellen",
+      "path": "tabellen",
+      "icon": "mdi:table",
+      "type": "sections",
+      "max_columns": 4,
+      "sections": [
+        {
+          "type": "grid",
+          "column_span": 2,
+          "cards": [
+            {
+              "type": "heading",
+              "heading": "Haus — jetzt",
+              "heading_style": "title"
+            },
+            {
+              "type": "markdown",
+              "content": "{% set pv = states('sensor.evcc_pv_power')|float(0) %}\n{% set grid = states('sensor.evcc_grid_power')|float(0) %}\n{% set bat = states('sensor.evcc_battery_power')|float(0) %}\n{% set soc = states('sensor.evcc_battery_soc')|float(0) %}\n{% set home = states('sensor.evcc_home_power')|float(0) %}\n{% set chg = states('sensor.evcc_go_e_charger_charge_power')|float(0) %}\n{% set sdm = states('sensor.sdm630_systemleistung')|float(0) %}\n| Haus — jetzt | Wert |\n| :--- | ---: |\n| **Haus gesamt (inkl. Wallbox)** | **{{ (home - sdm + chg*1000)|round(0)|int }} W** |\n| davon SolarEdge-Rohwert (ohne Wallbox) | {{ home|round(0)|int }} W |\n| Garagen-Zweig netto (SDM630) | {{ sdm|round(0)|int }} W {% if sdm < 0 %}(liefert ins Haus){% else %}(aus dem Haus){% endif %} |\n| Wallbox | {{ (chg*1000)|round(0)|int }} W |\n| Netz | {{ grid|round(0)|int }} W {% if grid >= 0 %}(Bezug){% else %}(Einspeisung){% endif %} |\n| PV-Erzeugung (Dach) | {{ pv|round(0)|int }} W |\n| Hausbatterie | {{ soc|round(1) }} %{% if bat > 20 %} · {{ bat|round(0)|int }} W entlädt{% elif bat < -20 %} · {{ (-bat)|round(0)|int }} W lädt{% else %} · idle{% endif %} |\n| Stand | {{ states.sensor.evcc_home_power.last_updated.strftime('%H:%M:%S') }} |\n",
+              "entity_id": [
+                "sensor.evcc_battery_power",
+                "sensor.evcc_battery_soc",
+                "sensor.evcc_go_e_charger_charge_power",
+                "sensor.evcc_grid_power",
+                "sensor.evcc_home_power",
+                "sensor.evcc_pv_power",
+                "sensor.sdm630_systemleistung"
+              ],
+              "card_size": 7
+            },
+            {
+              "type": "markdown",
+              "content": "<small>Der SolarEdge sieht nur seine eigene Erzeugung. Die Garagen-PV speist <b>hinter</b> seinem Messpunkt ins Haus ein und senkt damit den gemessenen Netzfluss, ohne in seiner Erzeugung aufzutauchen — sein Rohwert ist deshalb um den Garagen-Zweig zu klein. Deshalb: <b>Haus gesamt = SolarEdge-Rohwert − Garagen-Zweig netto + Wallbox</b>. Gegenprobe: der Wert muss über der Summe der Messsteckdosen liegen (tut er).</small>\n"
+            }
+          ]
+        },
+        {
+          "type": "grid",
+          "column_span": 2,
+          "cards": [
+            {
+              "type": "heading",
+              "heading": "PV — beide Anlagen",
+              "heading_style": "title"
+            },
+            {
+              "type": "markdown",
+              "content": "{% set se = states('sensor.evcc_pv_power')|float(0) %}\n{% set deye = states('sensor.garage_pv_leistung')|float(0) %}\n{% set sdm = states('sensor.sdm630_systemleistung')|float(0) %}\n{% set total = se + deye %}\n| PV — jetzt | Wert |\n| :--- | ---: |\n| **PV gesamt** | **{{ total|round(0)|int }} W** |\n| SolarEdge (Dach) | {{ se|round(0)|int }} W |\n| Garagen-PV (Deye) | {{ deye|round(0)|int }} W |\n| Garagen-Zweig netto (SDM630) | {{ sdm|round(0)|int }} W |\n| Differenz jetzt (enthält Deye-Verzögerung) | {{ (deye + sdm)|round(0)|int }} W |\n| Anteil Garagen-PV | {% if total > 0 %}{{ (deye / total * 100)|round(1) }} %{% else %}—{% endif %} |\n",
+              "entity_id": [
+                "sensor.evcc_pv_power",
+                "sensor.garage_pv_leistung",
+                "sensor.sdm630_systemleistung"
+              ],
+              "card_size": 7
+            },
+            {
+              "type": "markdown",
+              "content": "| PV — Ertrag | kWh |\n| :--- | ---: |\n| SolarEdge (Dach) | {{ states('sensor.evcc_stat_total_solar_k_wh_template')|float(0)|round(1) }} |\n| Garagen-PV (Deye) | {{ states('sensor.garage_pv_energie')|float(0)|round(2) }} |\n",
+              "entity_id": [
+                "sensor.evcc_stat_total_solar_k_wh_template",
+                "sensor.garage_pv_energie"
+              ],
+              "card_size": 4
+            },
+            {
+              "type": "markdown",
+              "content": "<small>Zwei getrennte Anlagen: SolarEdge auf dem Dach, Deye in der Garage — genau das, was die SolarEdge-App strukturell nicht zeigen kann. Die Erträge haben <b>nicht dieselbe Basis</b>: der SolarEdge-Wert ist die evcc-Statistik (seit evcc aufzeichnet), der Deye-Wert der Lebensdauer-Zähler des Wechselrichters (seit Installation) — deshalb bewusst keine Summe. Zwei Vorbehalte, beide gemessen: (1) die SolarEdge-Leistung ist bei Sättigung unzuverlässig, sie meldet zeitweise über 4600 W trotz 1-phasiger Begrenzung; (2) der Deye liefert seine Register nur ca. alle 4 Minuten neu (Wert kann also veraltet sein), und sein Energie-Zähler läuft 8× langsamer als seine eigene Leistungsanzeige — die Skalierung dieses Zählers ist ungeklärt und der kWh-Wert unten entsprechend unsicher. Die Zeile „Differenz jetzt“ ist deshalb nur eine Momentaufnahme. Belastbarer ist der Stundenmittelwert: er lag bei rund <b>45 W</b> — das ist der Garagenverbrauch (WLAN-Router, Wallbox-Standby, Torantrieb) plus eine kleine Abweichung des Deye-Registers; der SDM630 ist in sich konsistent (Zähler ↔ Leistung ≈ 1.00) und daher die verlässlichere der beiden Quellen.</small>\n"
+            }
+          ]
+        },
+        {
+          "type": "grid",
+          "column_span": 2,
+          "cards": [
+            {
+              "type": "heading",
+              "heading": "Wallbox & Garage (SDM630 = Ladepunkt + Garagen-PV)",
+              "heading_style": "title"
+            },
+            {
+              "type": "markdown",
+              "content": "| Wallbox & Garage (SDM630) | Wert |\n| :--- | ---: |\n| Wallbox jetzt | {{ (states('sensor.evcc_go_e_charger_charge_power')|float(0) * 1000)|round(0)|int }} W |\n| Garage netto | {{ states('sensor.sdm630_systemleistung')|float(0)|round(0)|int }} W |\n| Garage Bezug gesamt | {{ states('sensor.sdm630_gesamt_import_kwh')|float(0)|round(1) }} kWh |\n| Garage Einspeisung gesamt | {{ states('sensor.sdm630_gesamt_export_kwh')|float(0)|round(1) }} kWh |\n| Auto geladen gesamt | {{ states('sensor.evcc_stat_total_charged_kwh')|float(0)|round(1) }} kWh |\n",
+              "entity_id": [
+                "sensor.evcc_go_e_charger_charge_power",
+                "sensor.evcc_stat_total_charged_kwh",
+                "sensor.sdm630_gesamt_export_kwh",
+                "sensor.sdm630_gesamt_import_kwh",
+                "sensor.sdm630_systemleistung"
+              ],
+              "card_size": 6
+            },
+            {
+              "type": "markdown",
+              "content": "<small>Der SDM630 sitzt nur im Garagenzweig (Wallbox + Garagen-PV, beide dahinter) und ist <b>nicht</b> der Hauszähler. Aktiv nur auf L2; L1/L3 sind 0 A. Negative Werte = der Garagenzweig speist ins Haus ein.</small>\n"
+            }
+          ]
+        },
+        {
+          "type": "grid",
+          "column_span": 2,
+          "cards": [
+            {
+              "type": "heading",
+              "heading": "Garagen-PV (eigener Wechselrichter)",
+              "heading_style": "title"
+            },
+            {
+              "type": "markdown",
+              "content": "| Garagen-PV (Deye SUN-M160G4) | Wert |\n| :--- | ---: |\n| **AC-Leistung** | **{{ states('sensor.garage_pv_leistung')|float(0)|round(1) }} W** |\n| DC-Leistung (4 Eingänge) | {{ states('sensor.garage_pv_dc_leistung')|float(0)|round(1) }} W |\n| Wirkungsgrad DC→AC | {% set dc = states('sensor.garage_pv_dc_leistung')|float(0) %}{% set ac = states('sensor.garage_pv_leistung')|float(0) %}{% if dc > 0 %}{{ (ac / dc * 100)|round(1) }} %{% else %}—{% endif %} |\n| Netzspannung | {{ states('sensor.garage_pv_spannung')|float(0)|round(1) }} V |\n| Frequenz | {{ states('sensor.garage_pv_frequenz')|float(0)|round(2) }} Hz |\n| Energie gesamt | {{ states('sensor.garage_pv_energie')|float(0)|round(2) }} kWh |\n",
+              "entity_id": [
+                "sensor.garage_pv_dc_leistung",
+                "sensor.garage_pv_energie",
+                "sensor.garage_pv_frequenz",
+                "sensor.garage_pv_leistung",
+                "sensor.garage_pv_spannung"
+              ],
+              "card_size": 6
+            },
+            {
+              "type": "markdown",
+              "content": "<small>Eigener Mikro-Wechselrichter im Garagenzweig. Er erzeugt für das Haus, aber der SolarEdge misst nur seinen eigenen Ertrag: die Garagen-PV senkt den Netzfluss, ohne in der SolarEdge-Erzeugung zu erscheinen. Deshalb fehlt sie im Rohwert oben und wird über den Garagen-Zweig (SDM630) korrigiert. Garagen-PV und Garagen-Zweig-Netto sind nicht dasselbe: der SDM630 verrechnet Erzeugung und Garagenlasten (inkl. Wallbox) zu einem Netto-Wert — aktuell {{ states('sensor.garage_pv_leistung')|float(0)|round(0)|int }} W Erzeugung, netto {{ (states('sensor.sdm630_systemleistung')|float(0) * -1)|round(0)|int }} W ins Haus, der Rest verbraucht die Garage selbst.</small>\n"
+            }
+          ]
+        },
+        {
+          "type": "grid",
+          "column_span": 4,
+          "cards": [
+            {
+              "type": "heading",
+              "heading": "Steckdosen (alle Messstecker)",
+              "heading_style": "title"
+            },
+            {
+              "type": "markdown",
+              "content": "{% set plugs = [\n  ('ElektroHeizungKeller', 'sensor.elektroheizungkeller_leistung', 'sensor.elektroheizungkeller_summe_verbraucht'),\n  ('Arbeitszimmer WT', 'sensor.steckdose_arbeitszimmer_wt_leistung', 'sensor.steckdose_arbeitszimmer_wt_summe_verbraucht'),\n  ('Eingang - Staubsauger', 'sensor.tz3000_gjnozsaz_ts011f_leistung_8', 'sensor.tz3000_gjnozsaz_ts011f_summe_verbraucht_8'),\n  ('Keller Bastelraum', 'sensor.tz3000_gjnozsaz_ts011f_leistung_10', 'sensor.tz3000_gjnozsaz_ts011f_summe_verbraucht_10'),\n  ('Keller Fritz/Router/beelink...', 'sensor.tz3000_gjnozsaz_ts011f_leistung_9', 'sensor.tz3000_gjnozsaz_ts011f_summe_verbraucht_9'),\n  ('Keller Tiefkühltruhe', 'sensor.tz3000_gjnozsaz_ts011f_leistung_4', 'sensor.tz3000_gjnozsaz_ts011f_summe_verbraucht_4'),\n  ('Keller Waschmaschine', 'sensor.tz3000_gjnozsaz_ts011f_leistung_6', 'sensor.tz3000_gjnozsaz_ts011f_summe_verbraucht_6'),\n  ('Keller Wäschetrockner', 'sensor.tz3000_gjnozsaz_ts011f_leistung_5', 'sensor.tz3000_gjnozsaz_ts011f_summe_verbraucht_5'),\n  ('Knetzwerk Server', 'sensor.steckdose_knetzwerk_server_leistung', 'sensor.steckdose_knetzwerk_server_summe_verbraucht'),\n  ('Kühlschrank', 'sensor.steckdose_kuhlschrank_leistung', 'sensor.steckdose_kuhlschrank_summe_verbraucht'),\n  ('Lüfttrockner', 'sensor.steckdose_lufttrockner_leistung', 'sensor.steckdose_lufttrockner_summe_verbraucht'),\n  ('Mascha', 'sensor.steckdose_mascha_leistung', 'sensor.steckdose_mascha_summe_verbraucht'),\n  ('PC Lea', 'sensor.tz3000_gjnozsaz_ts011f_leistung_3', 'sensor.tz3000_gjnozsaz_ts011f_summe_verbraucht_3'),\n  ('Spülmaschine', 'sensor.stckdose_leistung', 'sensor.stckdose_summe_verbraucht'),\n  ('Treppe Beleuchtung', 'sensor.tz3000_gjnozsaz_ts011f_leistung_2', 'sensor.tz3000_gjnozsaz_ts011f_summe_verbraucht_2'),\n  ('Wohnzimmer Altar', 'sensor.tz3000_gjnozsaz_ts011f_leistung', 'sensor.tz3000_gjnozsaz_ts011f_summe_verbraucht'),\n  ('Wohnzimmer Kinect and Co', 'sensor.tz3000_gjnozsaz_ts011f_leistung_7', 'sensor.tz3000_gjnozsaz_ts011f_summe_verbraucht_7')\n] %}\n{% set ns = namespace(items=[], tw=0.0, te=0.0, live=0) %}\n{% for name, pw, en in plugs %}\n  {% set w = states(pw)|float(0) %}\n  {% set e = states(en)|float(0) %}\n  {% if states(pw) not in ['unknown','unavailable'] %}{% set ns.live = ns.live + 1 %}{% endif %}\n  {% set ns.items = ns.items + [[name, w, e, states(pw)]] %}\n  {% set ns.tw = ns.tw + w %}\n  {% set ns.te = ns.te + e %}\n{% endfor %}\nΣ der {{ plugs|count }} Messsteckdosen: **{{ ns.tw|round(1) }} W** ({{ ns.live }} live, {{ plugs|count - ns.live }} ohne Messwert) · kumuliert **{{ ns.te|round(1) }} kWh**\n\n| # | Steckdose | Leistung | Verbraucht | Anteil |\n| ---: | :--- | ---: | ---: | ---: |\n{% for it in ns.items|sort(attribute='1', reverse=true) %}| {{ loop.index }} | {{ it[0] }} | {% if it[3] in ['unknown','unavailable'] %}—{% else %}{{ it[1]|round(1) }} W{% endif %} | {{ it[2]|round(1) }} kWh | {% if ns.tw > 0 %}{{ (it[1] / ns.tw * 100)|round(1) }} %{% else %}—{% endif %} |\n{% endfor %}| | **Σ Summe** | **{{ ns.tw|round(1) }} W** | **{{ ns.te|round(1) }} kWh** | {{ ns.live }}/{{ plugs|count }} live |\n",
+              "entity_id": [
+                "sensor.elektroheizungkeller_leistung",
+                "sensor.elektroheizungkeller_summe_verbraucht",
+                "sensor.stckdose_leistung",
+                "sensor.stckdose_summe_verbraucht",
+                "sensor.steckdose_arbeitszimmer_wt_leistung",
+                "sensor.steckdose_arbeitszimmer_wt_summe_verbraucht",
+                "sensor.steckdose_knetzwerk_server_leistung",
+                "sensor.steckdose_knetzwerk_server_summe_verbraucht",
+                "sensor.steckdose_kuhlschrank_leistung",
+                "sensor.steckdose_kuhlschrank_summe_verbraucht",
+                "sensor.steckdose_lufttrockner_leistung",
+                "sensor.steckdose_lufttrockner_summe_verbraucht",
+                "sensor.steckdose_mascha_leistung",
+                "sensor.steckdose_mascha_summe_verbraucht",
+                "sensor.tz3000_gjnozsaz_ts011f_leistung",
+                "sensor.tz3000_gjnozsaz_ts011f_leistung_10",
+                "sensor.tz3000_gjnozsaz_ts011f_leistung_2",
+                "sensor.tz3000_gjnozsaz_ts011f_leistung_3",
+                "sensor.tz3000_gjnozsaz_ts011f_leistung_4",
+                "sensor.tz3000_gjnozsaz_ts011f_leistung_5",
+                "sensor.tz3000_gjnozsaz_ts011f_leistung_6",
+                "sensor.tz3000_gjnozsaz_ts011f_leistung_7",
+                "sensor.tz3000_gjnozsaz_ts011f_leistung_8",
+                "sensor.tz3000_gjnozsaz_ts011f_leistung_9",
+                "sensor.tz3000_gjnozsaz_ts011f_summe_verbraucht",
+                "sensor.tz3000_gjnozsaz_ts011f_summe_verbraucht_10",
+                "sensor.tz3000_gjnozsaz_ts011f_summe_verbraucht_2",
+                "sensor.tz3000_gjnozsaz_ts011f_summe_verbraucht_3",
+                "sensor.tz3000_gjnozsaz_ts011f_summe_verbraucht_4",
+                "sensor.tz3000_gjnozsaz_ts011f_summe_verbraucht_5",
+                "sensor.tz3000_gjnozsaz_ts011f_summe_verbraucht_6",
+                "sensor.tz3000_gjnozsaz_ts011f_summe_verbraucht_7",
+                "sensor.tz3000_gjnozsaz_ts011f_summe_verbraucht_8",
+                "sensor.tz3000_gjnozsaz_ts011f_summe_verbraucht_9"
+              ],
+              "card_size": 20
+            },
+            {
+              "type": "markdown",
+              "content": "<small>Vergleichsbasis ist <b>Haus gesamt (inkl. Wallbox)</b> oben. Der Unterschied wird bewusst nicht als „Restlast“ ausgewiesen: beide Zahlen stammen aus verschiedenen Messketten (Hauswert aus dem SolarEdge, Stecker per Zigbee, die nur bei Änderung senden und bei kleiner Last ±1–2 W Toleranz haben), und die Summe der Stecker lag schon über dem Hauswert.</small>\n"
+            }
+          ]
+        },
+        {
+          "type": "grid",
+          "column_span": 2,
+          "cards": [
+            {
+              "type": "heading",
+              "heading": "Klimaanlagen",
+              "heading_style": "title"
+            },
+            {
+              "type": "markdown",
+              "content": "| Raum | Zustand | Kompressor | Heute |\n| :--- | :--- | ---: | ---: |\n| Wohnzimmer | {% if states('climate.wzr_ap86576') == 'off' %}aus{% endif %}{% if states('climate.wzr_ap86576') == 'heat' %}heizt{% endif %}{% if states('climate.wzr_ap86576') == 'cool' %}kühlt{% endif %}{% if states('climate.wzr_ap86576') == 'heat_cool' %}auto{% endif %}{% if states('climate.wzr_ap86576') == 'auto' %}auto{% endif %}{% if states('climate.wzr_ap86576') == 'dry' %}entfeuchtet{% endif %}{% if states('climate.wzr_ap86576') == 'fan_only' %}Lüftung{% endif %}{% if states('climate.wzr_ap86576') == 'unavailable' %}n/a{% endif %}{% if states('climate.wzr_ap86576') == 'unknown' %}n/a{% endif %} | {{ (states('sensor.wzr_ap86576_geschatzte_leistungsaufnahme_des_kompressors')|float(0) * 1000)|round(0)|int }} W | {{ states('sensor.wzr_ap86576_energieverbrauch')|float(0)|round(2) }} kWh |\n| Leas Zimmer | {% if states('climate.kevin_ap02845') == 'off' %}aus{% endif %}{% if states('climate.kevin_ap02845') == 'heat' %}heizt{% endif %}{% if states('climate.kevin_ap02845') == 'cool' %}kühlt{% endif %}{% if states('climate.kevin_ap02845') == 'heat_cool' %}auto{% endif %}{% if states('climate.kevin_ap02845') == 'auto' %}auto{% endif %}{% if states('climate.kevin_ap02845') == 'dry' %}entfeuchtet{% endif %}{% if states('climate.kevin_ap02845') == 'fan_only' %}Lüftung{% endif %}{% if states('climate.kevin_ap02845') == 'unavailable' %}n/a{% endif %}{% if states('climate.kevin_ap02845') == 'unknown' %}n/a{% endif %} | {{ (states('sensor.kevin_ap02845_geschatzte_leistungsaufnahme_des_kompressors')|float(0) * 1000)|round(0)|int }} W | {{ states('sensor.kevin_ap02845_energieverbrauch')|float(0)|round(2) }} kWh |\n| Eltern Schlafzimmer | {% if states('climate.lea_ap27941') == 'off' %}aus{% endif %}{% if states('climate.lea_ap27941') == 'heat' %}heizt{% endif %}{% if states('climate.lea_ap27941') == 'cool' %}kühlt{% endif %}{% if states('climate.lea_ap27941') == 'heat_cool' %}auto{% endif %}{% if states('climate.lea_ap27941') == 'auto' %}auto{% endif %}{% if states('climate.lea_ap27941') == 'dry' %}entfeuchtet{% endif %}{% if states('climate.lea_ap27941') == 'fan_only' %}Lüftung{% endif %}{% if states('climate.lea_ap27941') == 'unavailable' %}n/a{% endif %}{% if states('climate.lea_ap27941') == 'unknown' %}n/a{% endif %} | {{ (states('sensor.lea_ap27941_geschatzte_leistungsaufnahme_des_kompressors')|float(0) * 1000)|round(0)|int }} W | {{ states('sensor.lea_ap27941_energieverbrauch')|float(0)|round(2) }} kWh |\n| Dachstudio | {% if states('climate.dach_ap22393') == 'off' %}aus{% endif %}{% if states('climate.dach_ap22393') == 'heat' %}heizt{% endif %}{% if states('climate.dach_ap22393') == 'cool' %}kühlt{% endif %}{% if states('climate.dach_ap22393') == 'heat_cool' %}auto{% endif %}{% if states('climate.dach_ap22393') == 'auto' %}auto{% endif %}{% if states('climate.dach_ap22393') == 'dry' %}entfeuchtet{% endif %}{% if states('climate.dach_ap22393') == 'fan_only' %}Lüftung{% endif %}{% if states('climate.dach_ap22393') == 'unavailable' %}n/a{% endif %}{% if states('climate.dach_ap22393') == 'unknown' %}n/a{% endif %} | {{ (states('sensor.dach_ap22393_geschatzte_leistungsaufnahme_des_kompressors')|float(0) * 1000)|round(0)|int }} W | {{ states('sensor.dach_ap22393_energieverbrauch')|float(0)|round(2) }} kWh |\n",
+              "entity_id": [
+                "climate.dach_ap22393",
+                "climate.kevin_ap02845",
+                "climate.lea_ap27941",
+                "climate.wzr_ap86576",
+                "sensor.dach_ap22393_energieverbrauch",
+                "sensor.dach_ap22393_geschatzte_leistungsaufnahme_des_kompressors",
+                "sensor.kevin_ap02845_energieverbrauch",
+                "sensor.kevin_ap02845_geschatzte_leistungsaufnahme_des_kompressors",
+                "sensor.lea_ap27941_energieverbrauch",
+                "sensor.lea_ap27941_geschatzte_leistungsaufnahme_des_kompressors",
+                "sensor.wzr_ap86576_energieverbrauch",
+                "sensor.wzr_ap86576_geschatzte_leistungsaufnahme_des_kompressors"
+              ],
+              "card_size": 6
+            },
+            {
+              "type": "markdown",
+              "content": "<small>Heute = kWh des laufenden Messzyklus der Klimaanlage, kein Lebensdauer-Zähler wie bei den Steckdosen.</small>\n"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "title": "Verlauf",
+      "path": "verlauf",
+      "icon": "mdi:chart-line",
+      "type": "sections",
+      "max_columns": 2,
+      "sections": [
+        {
+          "type": "grid",
+          "cards": [
+            {
+              "type": "heading",
+              "heading": "Leistung — letzte 24 h",
+              "heading_style": "title"
+            },
+            {
+              "type": "statistics-graph",
+              "title": "Hausverbrauch (W)",
+              "entities": [
+                "sensor.evcc_home_power"
+              ],
+              "hours_to_show": 24,
+              "chart_type": "line"
+            },
+            {
+              "type": "statistics-graph",
+              "title": "PV: SolarEdge + Garagen-PV (W)",
+              "entities": [
+                "sensor.evcc_pv_power",
+                "sensor.garage_pv_leistung"
+              ],
+              "hours_to_show": 24,
+              "chart_type": "line"
+            },
+            {
+              "type": "statistics-graph",
+              "title": "PV / Netz / Batterie (W)",
+              "entities": [
+                "sensor.evcc_pv_power",
+                "sensor.evcc_grid_power",
+                "sensor.evcc_battery_power"
+              ],
+              "hours_to_show": 24,
+              "chart_type": "line"
+            }
+          ]
+        },
+        {
+          "type": "grid",
+          "cards": [
+            {
+              "type": "heading",
+              "heading": "Zählerstände (kumuliert)",
+              "heading_style": "title"
+            },
+            {
+              "type": "statistics-graph",
+              "title": "Steckdosen (kWh)",
+              "entities": [
+                "sensor.steckdose_arbeitszimmer_wt_summe_verbraucht",
+                "sensor.tz3000_gjnozsaz_ts011f_summe_verbraucht_8",
+                "sensor.elektroheizungkeller_summe_verbraucht",
+                "sensor.tz3000_gjnozsaz_ts011f_summe_verbraucht_10",
+                "sensor.tz3000_gjnozsaz_ts011f_summe_verbraucht_9",
+                "sensor.tz3000_gjnozsaz_ts011f_summe_verbraucht_4",
+                "sensor.tz3000_gjnozsaz_ts011f_summe_verbraucht_6",
+                "sensor.tz3000_gjnozsaz_ts011f_summe_verbraucht_5",
+                "sensor.steckdose_knetzwerk_server_summe_verbraucht",
+                "sensor.steckdose_kuhlschrank_summe_verbraucht",
+                "sensor.steckdose_lufttrockner_summe_verbraucht",
+                "sensor.steckdose_mascha_summe_verbraucht",
+                "sensor.tz3000_gjnozsaz_ts011f_summe_verbraucht_3",
+                "sensor.stckdose_summe_verbraucht",
+                "sensor.tz3000_gjnozsaz_ts011f_summe_verbraucht_2",
+                "sensor.tz3000_gjnozsaz_ts011f_summe_verbraucht",
+                "sensor.tz3000_gjnozsaz_ts011f_summe_verbraucht_7"
+              ],
+              "hours_to_show": 168,
+              "chart_type": "line"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "title": "Schalter",
+      "path": "schalter",
+      "icon": "mdi:toggle-switch",
+      "type": "sections",
+      "max_columns": 2,
+      "sections": [
+        {
+          "type": "grid",
+          "cards": [
+            {
+              "type": "heading",
+              "heading": "Steckdosen schalten",
+              "heading_style": "title"
+            },
+            {
+              "type": "entities",
+              "state_color": true,
+              "entities": [
+                "switch.steckdose_arbeitszimmer_wt",
+                "sensor.steckdose_arbeitszimmer_wt_leistung",
+                "sensor.steckdose_arbeitszimmer_wt_summe_verbraucht",
+                "switch.tz3000_gjnozsaz_ts011f_8",
+                "sensor.tz3000_gjnozsaz_ts011f_leistung_8",
+                "sensor.tz3000_gjnozsaz_ts011f_summe_verbraucht_8",
+                "switch.elektroheizungkeller",
+                "sensor.elektroheizungkeller_leistung",
+                "sensor.elektroheizungkeller_summe_verbraucht",
+                "switch.tz3000_gjnozsaz_ts011f_10",
+                "sensor.tz3000_gjnozsaz_ts011f_leistung_10",
+                "sensor.tz3000_gjnozsaz_ts011f_summe_verbraucht_10",
+                "switch.tz3000_gjnozsaz_ts011f_9",
+                "sensor.tz3000_gjnozsaz_ts011f_leistung_9",
+                "sensor.tz3000_gjnozsaz_ts011f_summe_verbraucht_9",
+                "switch.tz3000_gjnozsaz_ts011f_4",
+                "sensor.tz3000_gjnozsaz_ts011f_leistung_4",
+                "sensor.tz3000_gjnozsaz_ts011f_summe_verbraucht_4",
+                "switch.tz3000_gjnozsaz_ts011f_6",
+                "sensor.tz3000_gjnozsaz_ts011f_leistung_6",
+                "sensor.tz3000_gjnozsaz_ts011f_summe_verbraucht_6",
+                "switch.tz3000_gjnozsaz_ts011f_5",
+                "sensor.tz3000_gjnozsaz_ts011f_leistung_5",
+                "sensor.tz3000_gjnozsaz_ts011f_summe_verbraucht_5",
+                "switch.steckdose_knetzwerk_server",
+                "sensor.steckdose_knetzwerk_server_leistung",
+                "sensor.steckdose_knetzwerk_server_summe_verbraucht",
+                "switch.steckdose_kuhlschrank",
+                "sensor.steckdose_kuhlschrank_leistung",
+                "sensor.steckdose_kuhlschrank_summe_verbraucht",
+                "switch.steckdose_lufttrockner",
+                "sensor.steckdose_lufttrockner_leistung",
+                "sensor.steckdose_lufttrockner_summe_verbraucht",
+                "switch.steckdose_mascha",
+                "sensor.steckdose_mascha_leistung",
+                "sensor.steckdose_mascha_summe_verbraucht",
+                "switch.tz3000_gjnozsaz_ts011f_3",
+                "sensor.tz3000_gjnozsaz_ts011f_leistung_3",
+                "sensor.tz3000_gjnozsaz_ts011f_summe_verbraucht_3",
+                "switch.stckdose",
+                "sensor.stckdose_leistung",
+                "sensor.stckdose_summe_verbraucht",
+                "switch.tz3000_gjnozsaz_ts011f_2",
+                "sensor.tz3000_gjnozsaz_ts011f_leistung_2",
+                "sensor.tz3000_gjnozsaz_ts011f_summe_verbraucht_2",
+                "switch.tz3000_gjnozsaz_ts011f",
+                "sensor.tz3000_gjnozsaz_ts011f_leistung",
+                "sensor.tz3000_gjnozsaz_ts011f_summe_verbraucht",
+                "switch.tz3000_gjnozsaz_ts011f_7",
+                "sensor.tz3000_gjnozsaz_ts011f_leistung_7",
+                "sensor.tz3000_gjnozsaz_ts011f_summe_verbraucht_7"
+              ]
+            },
+            {
+              "type": "markdown",
+              "content": "<small>Hier lassen sich die Steckdosen direkt schalten; die Tabelle im Reiter „Tabellen“ ist nur Anzeige.</small>\n"
+            }
+          ]
+        },
+        {
+          "type": "grid",
+          "cards": [
+            {
+              "type": "heading",
+              "heading": "Haus (SolarEdge) & Garage (SDM630)",
+              "heading_style": "title"
+            },
+            {
+              "type": "entities",
+              "entities": [
+                "sensor.evcc_home_power",
+                "sensor.evcc_grid_power",
+                "sensor.evcc_pv_power",
+                "sensor.evcc_battery_power",
+                "sensor.evcc_battery_soc",
+                "sensor.sdm630_systemleistung",
+                "sensor.evcc_go_e_charger_charge_power",
+                "sensor.evcc_stat_total_charged_kwh",
+                "sensor.sdm630_gesamt_import_kwh",
+                "sensor.sdm630_gesamt_export_kwh",
+                "sensor.evcc_stat_total_solar_k_wh_template",
+                "sensor.garage_pv_leistung",
+                "sensor.garage_pv_dc_leistung",
+                "sensor.garage_pv_spannung",
+                "sensor.garage_pv_frequenz",
+                "sensor.garage_pv_energie"
+              ]
+            },
+            {
+              "type": "heading",
+              "heading": "Klimaanlagen",
+              "heading_style": "title"
+            },
+            {
+              "type": "entities",
+              "entities": [
+                "climate.wzr_ap86576",
+                "sensor.wzr_ap86576_energieverbrauch",
+                "sensor.wzr_ap86576_geschatzte_leistungsaufnahme_des_kompressors",
+                "climate.kevin_ap02845",
+                "sensor.kevin_ap02845_energieverbrauch",
+                "sensor.kevin_ap02845_geschatzte_leistungsaufnahme_des_kompressors",
+                "climate.lea_ap27941",
+                "sensor.lea_ap27941_energieverbrauch",
+                "sensor.lea_ap27941_geschatzte_leistungsaufnahme_des_kompressors",
+                "climate.dach_ap22393",
+                "sensor.dach_ap22393_energieverbrauch",
+                "sensor.dach_ap22393_geschatzte_leistungsaufnahme_des_kompressors"
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

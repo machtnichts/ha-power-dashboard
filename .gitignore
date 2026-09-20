@@ -1,0 +1,27 @@
+# Rust build output of the deye poller
+deye-pv-rs/target/
+**/*.rs.bk
+
+# Installed binary (built by `make static` / `make install`)
+deye-pv-rs/bin/*
+
+# Python virtualenv of the dashboard
+.venv/
+venv/
+__pycache__/
+*.pyc
+*.pyo
+
+# Run artifacts
+logs/
+*.log
+*.stdout
+
+# Editor / OS
+.DS_Store
+*.swp
+.idea/
+.vscode/
+
+# Local notes that must never be published
+NOTES-local.md

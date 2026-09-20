@@ -1,0 +1,14 @@
+[package]
+name = "deyepv"
+version = "0.1.0"
+edition = "2021"
+description = "Read the garage PV (Deye SUN-M160G4 / SolarMAN logger) and publish it into Home Assistant"
+
+# Deliberately NO dependencies - not even a TLS stack or an MQTT client. The
+# published values go through Home Assistant's own REST API, the same way the
+# Python version does, so nothing here needs a broker password.
+[dependencies]
+
+[[bin]]
+name = "deyepv"
+path = "src/main.rs"

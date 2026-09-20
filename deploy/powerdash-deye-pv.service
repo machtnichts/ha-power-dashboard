@@ -1,0 +1,19 @@
+[Unit]
+Description=Garage PV (Deye SUN-M160G4) -> Home Assistant via MQTT
+Documentation=file:///home/adermake/HA-POWER-DASHBOARD/docs/README.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/adermake/HA-POWER-DASHBOARD
+# the venv holds pysolarmanv5; the token is read from ~/.hermes/.env at runtime
+ExecStart=/home/adermake/HA-POWER-DASHBOARD/.venv/bin/python -m powerdash.deye_pv
+Restart=always
+RestartSec=15
+# the poller only reads the logger and publishes via HA's REST API
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=default.target
