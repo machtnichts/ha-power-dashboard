@@ -57,17 +57,19 @@ second client is never started while the first is alive.
 * the charging controller of the same house (go-e wallbox, SolarEdge surplus)
 * the Modbus proxy that serves the inverter's single session to several readers
 
-## Open items
+## Behaviour worth knowing
 
-* **Nightly error flood from the Deye poller.** `deye-pv-rs` logs
-  `ERROR ConnectionError: ... 192.168.178.33:8899 Host is unreachable` every 33 s between
-  dusk and sunrise - around 2600 lines a night for a device that is *expected* to be off
-  then: the SolarMAN logger is powered from the inverter, so it leaves the network at dusk
-  and comes back after sunrise (last good line 21.09. 17:38 UTC, local sunset 17:40 UTC).
-  That noise hides real errors. Options: stay silent between dusk and sunrise (the sun entity,
-  or computed), throttle to one line per hour, or one counted summary per night - while an
-  unreachable logger at midday must stay an error. **Nothing is implemented on purpose: the
-  owner has an idea of his own and will decide.**
+* **The Deye poller backs off while the logger is away.** The logger is powered by the
+  inverter, so it leaves the network at dusk and returns after sunrise. Retrying it every
+  30 s produced ~2600 log lines *and* as many `offline` availability messages per night for a
+  device that was only asleep - which buried the errors that matter. The poller now doubles
+  its wait from the interval up to 15 minutes, logs a failure only at the start of a streak
+  and then every eighth step, and publishes the retained `offline` once per outage (the
+  recovery line reports how many attempts it cost). While backing off it watches the garage
+  meter (`sensor.sdm630_total_kwh`) through Home Assistant and polls again as soon as energy
+  flows there - the inverter exporting, or the car charging - so sunrise is caught within a
+  minute. An unreachable logger in bright daylight still reads as an error. Flags and the
+  schedule: `deye-pv-rs/README.md`.
 
 ## Notes
 

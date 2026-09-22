@@ -53,7 +53,8 @@ deyepv --recreate          # delete the entities, wait, recreate, push once
 ```
 
 Test-only options the Python version hardcodes: `--host`, `--port`, `--serial`,
-`--slave-id`, `--interval`, `--timeout`, `--log-csv PATH`, `--no-compare-log`.
+`--slave-id`, `--interval`, `--timeout`, `--log-csv PATH`, `--no-compare-log`,
+`--backoff-max S`, `--sdm-entity ID`, `--no-sdm-wake`.
 
 Credentials come from `HASS_URL` / `HASS_TOKEN` in the environment or
 `~/.hermes/.env`, and are never logged, printed or written anywhere.
@@ -172,6 +173,40 @@ The skipped bytes are printed so an unexpected frame can be identified later. If
 no usable reply arrives before the read timeout the poll fails exactly as before,
 and a failed poll still takes availability `offline` so a genuinely broken device
 cannot masquerade as healthy.
+
+## Retry behaviour when the logger is away
+
+A PV logger is powered by the inverter, so it leaves the network at dusk and comes back
+after sunrise. Polling it every 30 s through the night produced **~2600 log lines and 2600
+`offline` availability messages** for a device that was only asleep, which buried the
+errors that matter. So the poller backs off:
+
+| attempt | wait before the next try |
+|---|---|
+| healthy | `--interval` (30 s) |
+| 1st failure | 30 s |
+| 2nd | 60 s |
+| 3rd | 120 s |
+| … doubling | up to `--backoff-max` (default 900 s) |
+
+* **A log line only for the first failure of a streak and then every eighth step**, and the
+  retained `offline` message only when the state actually changes (once per outage). The
+  recovery line reports how many attempts the outage cost, so one episode is one line.
+* **The garage meter wakes it up again.** While backing off, the poller reads
+  `--sdm-entity` (default `sensor.sdm630_total_kwh`) once a minute through Home Assistant.
+  That counter grows in *either* direction, so it moves whenever energy flows in the garage
+  branch - the inverter exporting, or the car taking it. When it moves, the poller tries the
+  logger again at once instead of waiting out the rest of the backoff, which is how it
+  catches sunrise within a minute. One such early attempt per backoff period, so a logger
+  that stays dead in daylight cannot be hammered by its own wake-up probe.
+* **An unreachable logger in bright daylight stays an error** - it is the pole that is
+  broken, not the sun that is down, and the backoff makes that visible instead of noisy.
+* `--no-sdm-wake` turns the probe off where there is no meter to ask.
+
+Verified without touching the plant: the schedule, the throttling, the once-per-outage
+availability and the probe's gating are all unit-tested (33 tests in the binary); the
+night-time behaviour shows up in the journal as a handful of lines where there used to be
+thousands.
 
 ## Known difference
 

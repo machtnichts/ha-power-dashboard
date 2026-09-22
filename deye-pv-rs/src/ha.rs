@@ -91,6 +91,63 @@ impl HaClient {
         crate::json::parse(&text)
     }
 
+    /// One entity's state, read-only. Used as the liveness probe for the garage meter
+    /// (`--sdm-entity`), so it must never disturb the poll: every failure is just "no answer".
+    pub fn get_state(&self, entity: &str) -> Result<J, String> {
+        let (_, text) = self.get(&format!("/api/states/{}", entity))?;
+        crate::json::parse(&text)
+    }
+
+    /// Deliberately its own transport rather than a shared one with `post`: the publish
+    /// request is byte-compared against the Python implementation in the conformance tests,
+    /// and a refactor there is not worth the risk for one extra caller.
+    fn get(&self, path: &str) -> Result<(u16, String), String> {
+        let addr = format!("{}:{}", self.host, self.port);
+        let mut stream = TcpStream::connect(&addr)
+            .map_err(|e| format!("cannot reach Home Assistant at {}: {}", addr, e))?;
+        stream
+            .set_read_timeout(Some(self.timeout))
+            .map_err(|e| e.to_string())?;
+        stream
+            .set_write_timeout(Some(self.timeout))
+            .map_err(|e| e.to_string())?;
+
+        let request = format!(
+            "GET {}{} HTTP/1.1\r\nHost: {}\r\nAuthorization: Bearer {}\r\n\
+             Connection: close\r\n\r\n",
+            self.base_path, path, self.host, self.token
+        );
+        stream
+            .write_all(request.as_bytes())
+            .and_then(|_| stream.flush())
+            .map_err(|e| format!("sending to Home Assistant failed: {}", e))?;
+
+        let mut raw = Vec::new();
+        stream
+            .read_to_end(&mut raw)
+            .map_err(|e| format!("reading Home Assistant's reply failed: {}", e))?;
+        let text = String::from_utf8_lossy(&raw).to_string();
+        let status_line = text.lines().next().unwrap_or_default();
+        let status: u16 = status_line
+            .split_whitespace()
+            .nth(1)
+            .and_then(|s| s.parse().ok())
+            .ok_or_else(|| format!("unreadable reply from Home Assistant: '{}'", status_line))?;
+        let body_text = match text.find("\r\n\r\n") {
+            Some(i) => text[i + 4..].to_string(),
+            None => String::new(),
+        };
+        if status >= 400 {
+            return Err(format!(
+                "Home Assistant answered {} for {}: {}",
+                status,
+                path,
+                body_text.trim()
+            ));
+        }
+        Ok((status, body_text))
+    }
+
     fn post(&self, path: &str, body: &str) -> Result<(u16, String), String> {
         let addr = format!("{}:{}", self.host, self.port);
         let mut stream = TcpStream::connect(&addr)
