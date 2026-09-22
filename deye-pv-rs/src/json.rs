@@ -84,9 +84,25 @@ impl J {
     }
 }
 
-/// `round(x, prec)` as Python prints it: fixed decimals, point always present.
+/// `round(x, prec)` as Python's `json.dumps` prints it.
+///
+/// Python does not print the requested number of decimals: `round(2765.6, 2)` is the float
+/// 2765.6 and its repr is `2765.6`, not `2765.60`. Fixed-decimal formatting matched that only
+/// while every value happened to need all its decimals - the corrected energy scale (27955
+/// counts -> 2795.5 kWh) was the first case where it did not, and the byte-comparison test
+/// against the Python poller is what caught it. So: format with `prec` decimals, drop
+/// trailing zeros, but always keep at least one decimal (`253.0`, never `253`).
 pub fn fmt_dec(v: f64, prec: u8) -> String {
-    format!("{:.*}", prec as usize, v)
+    let mut s = format!("{:.*}", prec as usize, v);
+    if s.contains('.') {
+        while s.ends_with('0') {
+            s.pop();
+        }
+        if s.ends_with('.') {
+            s.push('0');
+        }
+    }
+    s
 }
 
 /// Python's `repr(float)`: shortest round-trip, with `.0` when it looks integral.
@@ -311,6 +327,9 @@ mod tests {
         assert_eq!(J::Dec(253.5, 1).to_json(), "253.5");
         assert_eq!(J::Dec(0.0, 1).to_json(), "0.0");
         assert_eq!(J::Dec(276.56, 2).to_json(), "276.56");
+        // Python drops trailing zeros, so a 2-decimal field may print fewer of them
+        assert_eq!(J::Dec(2765.6, 2).to_json(), "2765.6");
+        assert_eq!(J::Dec(50.0, 2).to_json(), "50.0");
         // a whole float must not collapse to an integer
         assert_eq!(J::Repr(0.0).to_json(), "0.0");
         assert_eq!(J::Repr(235.7).to_json(), "235.7");

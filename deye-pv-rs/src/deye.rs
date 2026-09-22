@@ -2,7 +2,14 @@
 //!
 //! Register map from the deye-solarman-logger skill: one FC3 read of 125
 //! registers from 0x0000 covers everything, the values are read-only, and the
-//! scales are fixed (0.1 W, 0.1 V, 0.01 Hz, 0.01 kWh, 0.1 V / 0.1 A per DC input).
+//! scales are fixed (0.1 W, 0.1 V, 0.01 Hz, 0.1 kWh, 0.1 V / 0.1 A per DC input).
+//!
+//! The energy scale was *assumed* 0.01 kWh until 2026-09-22 and was wrong by a factor of
+//! ten. Settled by the skill's own method - the counter must advance at the rate the power
+//! implies: over 21.09.2026 05:00-17:00 UTC the register went 27913 -> 27955 (42 counts)
+//! while the logged AC power integrated to 4.18 kWh, so one count is ~0.0995 kWh. The
+//! vendor app agrees from the other side (2.79 MWh after 739 days of operation, ~3.8 kWh
+//! per day, which matches this plant's measured daily yield).
 //!
 //! The rounding and the JSON shape are those of the Python poller, because the
 //! differential test compares the published payloads byte for byte.
@@ -60,7 +67,8 @@ impl Reading {
                 "frequency_hz".to_string(),
                 J::Dec(self.frequency_hz / 100.0, 2),
             ),
-            ("energy_kwh".to_string(), J::Dec(self.energy_kwh / 100.0, 2)),
+            // 0.1 kWh per register count - see the module doc for how that was settled.
+            ("energy_kwh".to_string(), J::Dec(self.energy_kwh / 10.0, 2)),
             ("dc_inputs".to_string(), J::Arr(dc)),
             ("dc_power_w".to_string(), J::Dec(self.dc_power_w, 1)),
             (
@@ -113,8 +121,28 @@ pub fn summary_line(timestamp: &str, r: &Reading) -> String {
         r.dc_power_w,
         r.ac_voltage_v / 10.0,
         r.frequency_hz / 100.0,
-        r.energy_kwh / 100.0
+        r.energy_kwh / 10.0
     )
+}
+
+/// What to publish as the lifetime energy, given this reading and the last plausible one.
+///
+/// A lifetime counter never decreases, but this one forgets: for a few minutes after the
+/// logger wakes up the register reports **0**, and the value then jumps back to the real one.
+/// Publishing such a reading is not harmless - Home Assistant treats a drop on a
+/// `total_increasing` sensor as a counter reset and ADDS the new value, so one morning would
+/// book the register's whole value (~2795 kWh at the corrected scale) as freshly generated
+/// energy in its statistics. So a lower reading is replaced by the last plausible one, and
+/// the caller logs how often that happened.
+///
+/// Note for later: the register is 16-bit, so it wraps at 6553.5 kWh (about 2.7 years away
+/// at this plant's rate) - at the wrap this guard would freeze the figure, so the 32-bit pair
+/// (0x3F + a high word) has to be checked before then. It is an open item, not a defect yet.
+pub fn energy_to_publish(raw: u16, last: Option<u16>) -> (u16, bool) {
+    match last {
+        Some(prev) if raw < prev => (prev, true),
+        _ => (raw, false),
+    }
 }
 
 #[cfg(test)]
@@ -159,7 +187,7 @@ mod tests {
         assert!(text.contains(r#""ac_power_w": 253.5"#), "{}", text);
         assert!(text.contains(r#""ac_voltage_v": 236.3"#), "{}", text);
         assert!(text.contains(r#""frequency_hz": 49.98"#), "{}", text);
-        assert!(text.contains(r#""energy_kwh": 276.56"#), "{}", text);
+        assert!(text.contains(r#""energy_kwh": 2765.6"#), "{}", text);
         // the DC pair must appear divided exactly once
         assert!(text.contains(r#"{"v": 236.0, "a": 1.2}"#), "{}", text);
         assert!(
@@ -167,6 +195,36 @@ mod tests {
             "{}",
             text
         );
+    }
+
+    /// The scale that was wrong by ten until 2026-09-22: one count is 0.1 kWh, pinned
+    /// against the power integrated over the same window (see the module doc). The live
+    /// register stood at 27955 counts, which is 2795.5 kWh - the vendor app's 2.79 MWh.
+    #[test]
+    fn the_energy_scale_is_tenths_of_a_kwh() {
+        let r = decode(&block(0, 2363, 4998, 27955, [(0, 0); 4])).unwrap();
+        assert_eq!(r.energy_kwh, 27955.0);
+        let text = r.to_json().to_json();
+        assert!(text.contains(r#""energy_kwh": 2795.5"#), "{}", text);
+        assert!(
+            summary_line("x", &r).contains("2795.50 kWh"),
+            "{}",
+            summary_line("x", &r)
+        );
+    }
+
+    /// The register's post-wake 0.00 must never reach Home Assistant (see the function doc).
+    #[test]
+    fn a_counter_that_goes_backwards_is_replaced() {
+        // the first reading is taken as it comes
+        assert_eq!(energy_to_publish(27955, None), (27955, false));
+        // growth is published
+        assert_eq!(energy_to_publish(27962, Some(27955)), (27962, false));
+        // the wake-up zero (and any other drop) is replaced by the last plausible value
+        assert_eq!(energy_to_publish(0, Some(27962)), (27962, true));
+        assert_eq!(energy_to_publish(27900, Some(27962)), (27962, true));
+        // an unchanged reading is fine, and stays the reference
+        assert_eq!(energy_to_publish(27962, Some(27962)), (27962, false));
     }
 
     #[test]

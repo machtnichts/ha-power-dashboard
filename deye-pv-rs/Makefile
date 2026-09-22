@@ -37,7 +37,7 @@ differential:
 diffcsv:
 	python3 tools/differential_csv.py
 
-check: test differential diffcsv
+check: build test differential diffcsv
 	@echo
 	@echo "=== all checks passed ==="
 

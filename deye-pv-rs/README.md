@@ -247,6 +247,21 @@ last confirmation that the measured protocol layout is right. The AC power shoul
 match the Solarman app within a few watts, and the energy counter should be
 unchanged to within a tenth of a kWh.
 
+**Deploying a new build: stop the unit first.** `make install` copies over
+`bin/deyepv`, and `cp` refuses with `Text file busy` while the service is running -
+then `make install` fails, the service still runs the *old* binary, and the new code
+looks like it did nothing. Check the marker in the log after restarting (the energy
+scale fix read `2795.60 kWh` where the old build said `279.56`).
+
+**The energy register counts 0.1 kWh** (corrected 2026-09-22; it was assumed 0.01,
+i.e. read ten times too low). Settled by the counter-vs-power consistency test: over
+21.09. 05:00-17:00 UTC the register advanced 42 counts while the logged AC power
+integrated to 4.18 kWh, so one count is ~0.0995 kWh - and the vendor app agrees with
+2.79 MWh after 739 days of operation. The poller also refuses to publish a counter
+that went backwards (the register reports 0 for minutes after every wake-up; Home
+Assistant would read that drop as a counter reset and add its whole value to the
+statistics).
+
 Rolling back is the same in reverse: `systemctl --user disable --now
 powerdash-deye-pv-rs.service`, then enable the Python one. The dashboard needs no
 change either way — the entity ids are identical.

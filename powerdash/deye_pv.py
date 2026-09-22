@@ -30,6 +30,10 @@ SERIAL = 3842831288          # the serial the device reports in its own replies
 INTERVAL_S = 30
 _INV = None
 _LAST_OK = None
+# The last plausible lifetime count and how often the register contradicted itself - see
+# energy_to_publish().
+_LAST_ENERGY = None
+_GLITCHES = [0]
 DEVICE = {"identifiers": ["deye_sun_m160g4_garage"],
           "name": "Garage PV (Deye SUN-M160G4)",
           "manufacturer": "Deye", "model": "SUN-M160G4-EU-Q0"}
@@ -92,7 +96,11 @@ def read_deye():
         "ac_power_w": round(v[0x0056] / 10.0, 1),
         "ac_voltage_v": round(v[0x005B] / 10.0, 1),
         "frequency_hz": round(v[0x005D] / 100.0, 2),
-        "energy_kwh": round(v[0x003F] / 100.0, 2),
+        # 0.1 kWh per register count. It was 0.01 until 2026-09-22 and read ten times too
+        # low: over 21.09. 05:00-17:00 UTC the counter advanced 42 counts while the AC power
+        # integrated to 4.18 kWh, so one count is ~0.1 kWh (the vendor app's 2.79 MWh over
+        # 739 days agrees).
+        "energy_kwh": round(v[0x003F] / 10.0, 2),
         "dc_inputs": dc,
         "dc_power_w": round(sum(d["v"] * d["a"] for d in dc), 1),
         "logger_serial": "".join(chr((v[0x0003 + i] >> s) & 0xFF)
@@ -139,6 +147,22 @@ def publish_discovery(dry=False, cleanup=False):
         print("  availability -> %s" % ha_publish("powerdash/garage_pv/status", "online", True))
 
 
+def energy_to_publish(raw_counts, last_counts):
+    """(counts to publish, replaced) - a lifetime counter must never go backwards.
+
+    This register reports 0 for a few minutes after the logger wakes up and then jumps back
+    to the real value. Publishing that drop is not harmless: Home Assistant reads a drop on a
+    `total_increasing` sensor as a counter reset and ADDS the new value, so a single morning
+    would book the register's whole value (~2795 kWh at the corrected 0.1 kWh scale) as
+    freshly generated energy in its statistics. A lower reading is therefore replaced by the
+    last plausible one. (16-bit register: it wraps at 6553.5 kWh, ~2.7 years away - at that
+    point this guard would freeze the figure, so the high word needs checking before then.)
+    """
+    if last_counts is not None and raw_counts < last_counts:
+        return int(last_counts), True
+    return int(raw_counts), False
+
+
 def push_once():
     """One read of the logger, published to the state topic. Returns True on success.
 
@@ -146,9 +170,20 @@ def push_once():
     'unavailable' until something publishes 'online' again - the recovery path has
     to republish it, not just the startup path.
     """
-    global _LAST_OK
+    global _LAST_OK, _LAST_ENERGY
     try:
         data = read_deye()
+        raw_counts = data["energy_kwh"] * 10.0          # back to register counts
+        counts, replaced = energy_to_publish(raw_counts, _LAST_ENERGY)
+        if replaced:
+            _GLITCHES[0] += 1
+            if _GLITCHES[0] == 1 or _GLITCHES[0] % 10 == 0:
+                print("%s  energy register reported %d counts where %s was plausible - "
+                      "published the plausible value (%dx so far)"
+                      % (time.strftime("%H:%M:%S"), raw_counts, _LAST_ENERGY, _GLITCHES[0]),
+                      flush=True)
+        _LAST_ENERGY = counts
+        data["energy_kwh"] = round(counts / 10.0, 2)
         ha_publish(STATE_TOPIC, json.dumps(data), retain=True)
         if _LAST_OK is not True:
             ha_publish(AVAILABILITY_TOPIC, "online", retain=True)

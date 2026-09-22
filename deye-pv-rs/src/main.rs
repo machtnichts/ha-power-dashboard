@@ -259,6 +259,12 @@ fn should_probe_sdm(failing: bool, snoozed: bool, wait_s: u64, interval_s: u64, 
       failures: u32,
       /// The garage meter's counter as last seen; `None` until the first look.
       sdm_seen: Option<String>,
+      /// The inverter's lifetime counter as last *plausible* seen. A lower reading (this
+      /// register reports 0 for minutes after every wake-up) must never be published: Home
+      /// Assistant adds the new value on a drop of a `total_increasing` sensor, so a single
+      /// morning would book the register's whole value as invented generation.
+      energy_raw: Option<u16>,
+      energy_glitches: u32,
   }
 
 impl Poller {
@@ -279,6 +285,8 @@ impl Poller {
             last_ok: None,
             failures: 0,
             sdm_seen: None,
+            energy_raw: None,
+            energy_glitches: 0,
         })
     }
 
@@ -313,7 +321,7 @@ impl Poller {
     /// One read, published. Returns true on success.
     fn push_once(&mut self) -> bool {
         let attempt = self.read();
-        let reading = match attempt {
+        let mut reading = match attempt {
             Ok(r) => r,
             Err(e) => {
                 // a failed read leaves a half-read socket behind, drop it
@@ -342,6 +350,26 @@ impl Poller {
                 return false;
             }
         };
+
+        // Never publish a lifetime counter that went backwards: this register reports 0 for
+        // minutes after every wake-up, and Home Assistant adds the new value when a
+        // `total_increasing` sensor drops - which would book its whole value as generation.
+        let (energy_raw, replaced) =
+            deye::energy_to_publish(reading.energy_kwh as u16, self.energy_raw);
+        if replaced {
+            self.energy_glitches += 1;
+            if self.energy_glitches == 1 || self.energy_glitches % 10 == 0 {
+                logging::line(&format!(
+                    "{}  energy register reported {} counts where {} was plausible - published the plausible value ({}x so far)",
+                    logging::hms(),
+                    reading.energy_kwh as u16,
+                    energy_raw,
+                    self.energy_glitches
+                ));
+            }
+        }
+        self.energy_raw = Some(energy_raw);
+        reading.energy_kwh = energy_raw as f64;
 
         let payload = reading.to_json().to_json();
         if let Err(e) = self.ha.publish(discovery::STATE_TOPIC, &payload, true) {

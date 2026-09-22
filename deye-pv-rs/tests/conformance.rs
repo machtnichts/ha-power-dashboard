@@ -29,7 +29,7 @@ const REGISTERS: &[(&str, u16)] = &[
     ("0x56", 2535),  // AC power 253.5 W
     ("0x5B", 2363),  // AC voltage 236.3 V
     ("0x5D", 4998),  // frequency 49.98 Hz
-    ("0x3F", 27656), // energy 276.56 kWh
+    ("0x3F", 27656), // energy 2765.6 kWh (0.1 kWh per count)
     ("0x6D", 2360),  // DC1 236.0 V
     ("0x6E", 12),    // DC1 1.2 A
     ("0x6F", 2358),  // DC2 235.8 V
@@ -44,7 +44,7 @@ const REGISTERS: &[(&str, u16)] = &[
 
 const EXPECTED_STATE: &str = concat!(
     r#"{"ac_power_w": 253.5, "ac_voltage_v": 236.3, "frequency_hz": 49.98, "#,
-    r#""energy_kwh": 276.56, "dc_inputs": [{"v": 236.0, "a": 1.2}, {"v": 235.8, "a": 0.5}, "#,
+    r#""energy_kwh": 2765.6, "dc_inputs": [{"v": 236.0, "a": 1.2}, {"v": 235.8, "a": 0.5}, "#,
     r#"{"v": 0.0, "a": 0.0}, {"v": 0.0, "a": 0.0}], "dc_power_w": 401.1, "#,
     r#""logger_serial": "2404190ABE"}"#
 );
