@@ -57,6 +57,18 @@ second client is never started while the first is alive.
 * the charging controller of the same house (go-e wallbox, SolarEdge surplus)
 * the Modbus proxy that serves the inverter's single session to several readers
 
+## Open items
+
+* **Nightly error flood from the Deye poller.** `deye-pv-rs` logs
+  `ERROR ConnectionError: ... 192.168.178.33:8899 Host is unreachable` every 33 s between
+  dusk and sunrise - around 2600 lines a night for a device that is *expected* to be off
+  then: the SolarMAN logger is powered from the inverter, so it leaves the network at dusk
+  and comes back after sunrise (last good line 21.09. 17:38 UTC, local sunset 17:40 UTC).
+  That noise hides real errors. Options: stay silent between dusk and sunrise (the sun entity,
+  or computed), throttle to one line per hour, or one counted summary per night - while an
+  unreachable logger at midday must stay an error. **Nothing is implemented on purpose: the
+  owner has an idea of his own and will decide.**
+
 ## Notes
 
 Private RFC1918 addresses and Home Assistant entity names appear throughout: they describe
